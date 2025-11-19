@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "vtgP1GF667A=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\ADMIN\\source\\repos\\ScreenStreaming\\ScreenClient\\ScreenClient.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\ADMIN\\.nuget\\packages\\microsoft.win32.systemevents\\10.0.0\\microsoft.win32.systemevents.10.0.0.nupkg.sha512",
+    "C:\\Users\\ADMIN\\.nuget\\packages\\system.drawing.common\\10.0.0\\system.drawing.common.10.0.0.nupkg.sha512"
+  ],
+  "logs": []
+}
