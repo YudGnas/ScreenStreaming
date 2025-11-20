@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ScreenClient")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+7b7ce775351c7de173144e81d05375ec7d205aa0")]
 [assembly: System.Reflection.AssemblyProductAttribute("ScreenClient")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ScreenClient")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -1,0 +1,42 @@
+﻿<Window x:Class="ClientStream.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:ClientStream"
+        mc:Ignorable="d"
+        Title="MainWindow" Height="450" Width="800">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,12">
+            <TextBlock Text="Server IP:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox x:Name="ServerIpTextBox" Width="180" Text="127.0.0.1"/>
+        </StackPanel>
+
+        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12">
+            <Button x:Name="StartButton"
+                    Content="Start Streaming"
+                    Width="140"
+                    Height="32"
+                    Margin="0,0,12,0"
+                    Click="StartStreaming_Click"/>
+            <Button x:Name="StopButton"
+                    Content="Stop Streaming"
+                    Width="140"
+                    Height="32"
+                    Click="StopStreaming_Click"/>
+        </StackPanel>
+
+        <TextBlock x:Name="StatusText"
+                   Grid.Row="2"
+                   Foreground="DarkGreen"
+                   TextWrapping="Wrap"
+                   Text="Chưa kết nối."/>
+    </Grid>
+</Window>
