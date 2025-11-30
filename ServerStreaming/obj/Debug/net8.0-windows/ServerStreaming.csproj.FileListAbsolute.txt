@@ -27,3 +27,12 @@ C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\obj\Debug\net8.0-win
 C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\obj\Debug\net8.0-windows\ServerStreaming.pdb
 C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\obj\Debug\net8.0-windows\ServerStreaming.genruntimeconfig.cache
 C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\obj\Debug\net8.0-windows\ref\ServerStreaming.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\OpenCvSharp.Extensions.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\System.Drawing.Common.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.Asio.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.Core.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.Midi.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.Wasapi.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.WinForms.dll
+C:\Users\ADMIN\source\repos\ScreenStreaming\ServerStreaming\bin\Debug\net8.0-windows\NAudio.WinMM.dll

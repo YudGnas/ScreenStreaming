@@ -1,19 +1,13 @@
-﻿using System.IO;
-using System.Net.Sockets;
-using System.Net;
+﻿using OpenCvSharp;
 using System;
+using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Data;
-using System.Windows.Documents;
-using System.Windows.Input;
-using System.Windows.Media;
 using System.Windows.Media.Imaging;
-using System.Windows.Navigation;
-using System.Windows.Shapes;
-using OpenCvSharp;
-
+using NAudio.Wave;
 
 namespace ServerStreaming
 {
@@ -24,6 +18,9 @@ namespace ServerStreaming
         private bool recordRequested;
         private readonly object recorderLock = new();
         private const int PORT = 5000;
+        private WaveOutEvent? waveOut;
+        private BufferedWaveProvider? bufferedWaveProvider;
+        private readonly object audioLock = new();
 
         public MainWindow()
         {
@@ -94,39 +91,137 @@ namespace ServerStreaming
         private async Task HandleClient(TcpClient client)
         {
             NetworkStream ns = client.GetStream();
+            byte[] headerBuffer = new byte[3];
             byte[] lengthBuffer = new byte[4];
+
+            // Initialize audio output
+            lock (audioLock)
+            {
+                if (waveOut == null)
+                {
+                    waveOut = new WaveOutEvent();
+                    var waveFormat = new WaveFormat(16000, 16, 1);
+                    bufferedWaveProvider = new BufferedWaveProvider(waveFormat)
+                    {
+                        BufferLength = 1024 * 1024,
+                        DiscardOnBufferOverflow = true
+                    };
+                    waveOut.Init(bufferedWaveProvider);
+                    waveOut.Play();
+                }
+            }
 
             while (true)
             {
                 try
                 {
-                    int read = await ns.ReadAsync(lengthBuffer, 0, 4);
-                    if (read == 0) break;
-                    int imgLength = BitConverter.ToInt32(lengthBuffer, 0);
+                    // Read first 3 bytes to check for "AUD" header
+                    int headerRead = await ns.ReadAsync(headerBuffer, 0, 3);
+                    if (headerRead == 0) break;
+                    if (headerRead < 3) break;
 
-                    byte[] imgBuffer = new byte[imgLength];
-                    int offset = 0;
-                    while (offset < imgLength)
+                    // Check if it's audio header
+                    if (headerBuffer[0] == 0x41 && headerBuffer[1] == 0x55 && headerBuffer[2] == 0x44) // "AUD"
                     {
-                        int bytesRead = await ns.ReadAsync(imgBuffer, offset, imgLength - offset);
-                        if (bytesRead == 0) break;
-                        offset += bytesRead;
+                        // This is audio data - read the 4-byte length
+                        int lengthRead = await ns.ReadAsync(lengthBuffer, 0, 4);
+                        if (lengthRead < 4) break;
+
+                        int audioLength = BitConverter.ToInt32(lengthBuffer, 0);
+
+                        // Validate audio length (reasonable range)
+                        if (audioLength <= 0 || audioLength > 1024 * 1024)
+                        {
+                            Console.WriteLine($"Invalid audio length: {audioLength}");
+                            continue;
+                        }
+
+                        byte[] audioBuffer = new byte[audioLength];
+                        int audioOffset = 0;
+                        while (audioOffset < audioLength)
+                        {
+                            int bytesRead = await ns.ReadAsync(audioBuffer, audioOffset, audioLength - audioOffset);
+                            if (bytesRead == 0) break;
+                            audioOffset += bytesRead;
+                        }
+
+                        if (audioOffset == audioLength)
+                        {
+                            // Play audio
+                            lock (audioLock)
+                            {
+                                if (waveOut != null && bufferedWaveProvider != null && waveOut.PlaybackState == PlaybackState.Playing)
+                                {
+                                    bufferedWaveProvider.AddSamples(audioBuffer, 0, audioBuffer.Length);
+                                }
+                            }
+                        }
                     }
+                    else
+                    {
+                        // This is video data - the 3 bytes we read are the first 3 bytes of the 4-byte length
+                        // Read the 4th byte
+                        lengthBuffer[0] = headerBuffer[0];
+                        lengthBuffer[1] = headerBuffer[1];
+                        lengthBuffer[2] = headerBuffer[2];
+                        int fourthByte = await ns.ReadAsync(lengthBuffer, 3, 1);
+                        if (fourthByte < 1) break;
 
-                    BitmapImage img = new BitmapImage();
-                    img.BeginInit();
-                    img.StreamSource = new MemoryStream(imgBuffer);
-                    img.CacheOption = BitmapCacheOption.OnLoad;
-                    img.EndInit();
-                    img.Freeze();
+                        int imgLength = BitConverter.ToInt32(lengthBuffer, 0);
 
-                    WriteFrame(imgBuffer, img.PixelWidth, img.PixelHeight);
+                        // Validate image length (reasonable range)
+                        if (imgLength <= 0 || imgLength > 50 * 1024 * 1024) // Max 50MB
+                        {
+                            Console.WriteLine($"Invalid image length: {imgLength}");
+                            continue;
+                        }
 
-                    Dispatcher.Invoke(() => imgView.Source = img);
+                        byte[] imgBuffer = new byte[imgLength];
+                        int offset = 0;
+                        while (offset < imgLength)
+                        {
+                            int bytesRead = await ns.ReadAsync(imgBuffer, offset, imgLength - offset);
+                            if (bytesRead == 0) break;
+                            offset += bytesRead;
+                        }
+
+                        if (offset == imgLength)
+                        {
+                            try
+                            {
+                                BitmapImage img = new BitmapImage();
+                                img.BeginInit();
+                                img.StreamSource = new MemoryStream(imgBuffer);
+                                img.CacheOption = BitmapCacheOption.OnLoad;
+                                img.EndInit();
+                                img.Freeze();
+
+                                WriteFrame(imgBuffer, img.PixelWidth, img.PixelHeight);
+
+                                Dispatcher.Invoke(() => imgView.Source = img);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error processing image: {ex.Message}");
+                            }
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
+                    Console.WriteLine($"Error in HandleClient: {ex.Message}");
                     break;
+                }
+            }
+
+            // Don't dispose audio output - keep it for next client
+            // Just stop playback
+            lock (audioLock)
+            {
+                if (waveOut != null && bufferedWaveProvider != null)
+                {
+                    // Clear the buffer but keep the output ready
+                    bufferedWaveProvider.ClearBuffer();
                 }
             }
 
@@ -158,7 +253,7 @@ namespace ServerStreaming
 
                 if (recorder == null)
                 {
-                    string output = System.IO.Path.Combine(Environment.CurrentDirectory,
+                    string output = Path.Combine(Environment.CurrentDirectory,
                         $"record_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
 
                     recorder = new VideoWriter(

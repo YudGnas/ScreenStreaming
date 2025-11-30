@@ -11,32 +11,63 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- Row 0: IP -->
         <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,12">
             <TextBlock Text="Server IP:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox x:Name="ServerIpTextBox" Width="180" Text="127.0.0.1"/>
         </StackPanel>
 
+        <!-- ⭐ Row 1: Chọn nguồn Stream -->
         <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12">
-            <Button x:Name="StartButton"
-                    Content="Start Streaming"
-                    Width="140"
-                    Height="32"
-                    Margin="0,0,12,0"
-                    Click="StartStreaming_Click"/>
-            <Button x:Name="StopButton"
-                    Content="Stop Streaming"
-                    Width="140"
-                    Height="32"
-                    Click="StopStreaming_Click"/>
+            <TextBlock Text="Nguồn:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <ComboBox x:Name="SourceComboBox" Width="150">
+                <ComboBoxItem Content="Screen" IsSelected="True"/>
+                <ComboBoxItem Content="Webcam"/>
+            </ComboBox>
         </StackPanel>
 
+        <!-- Row 2: Buttons -->
+        <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,12">
+            <Button x:Name="StartButton"
+                Content="Start Streaming"
+                Width="140"
+                Height="32"
+                Margin="0,0,12,0"
+                Click="StartStreaming_Click"/>
+            <Button x:Name="StopButton"
+                Content="Stop Streaming"
+                Width="140"
+                Height="32"
+                Margin="0,0,12,0"
+                Click="StopStreaming_Click"/>
+            <Button x:Name="MicToggleButton"
+                Content="Mic: Off"
+                Width="120"
+                Height="32"
+                Click="MicToggle_Click"/>
+        </StackPanel>
+
+        <!-- Row 3: Status -->
         <TextBlock x:Name="StatusText"
-                   Grid.Row="2"
-                   Foreground="DarkGreen"
-                   TextWrapping="Wrap"
-                   Text="Chưa kết nối."/>
+               Grid.Row="3"
+               Foreground="DarkGreen"
+               TextWrapping="Wrap"
+               Text="Chưa kết nối."
+               Margin="0,0,0,12"/>
+
+        <!-- Row 4: Preview -->
+        <Border Grid.Row="4" 
+                BorderBrush="Gray" 
+                BorderThickness="1" 
+                Background="Black"
+                Margin="0,0,0,0">
+            <Image x:Name="PreviewImage" 
+                   Stretch="Uniform"
+                   RenderOptions.BitmapScalingMode="HighQuality"/>
+        </Border>
     </Grid>
 </Window>

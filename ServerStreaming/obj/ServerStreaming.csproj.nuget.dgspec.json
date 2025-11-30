@@ -50,7 +50,15 @@
         "net8.0-windows7.0": {
           "targetAlias": "net8.0-windows",
           "dependencies": {
+            "NAudio": {
+              "target": "Package",
+              "version": "[2.2.1, )"
+            },
             "OpenCvSharp4": {
+              "target": "Package",
+              "version": "[4.11.0.20250507, )"
+            },
+            "OpenCvSharp4.Extensions": {
               "target": "Package",
               "version": "[4.11.0.20250507, )"
             },
