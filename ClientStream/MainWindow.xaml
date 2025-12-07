@@ -8,21 +8,30 @@
         Title="MainWindow" Height="450" Width="800">
     <Grid Margin="16">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-
-        <!-- Row 0: IP -->
-        <StackPanel Orientation="Horizontal" Grid.Row="0" Margin="0,0,0,12">
+        <!-- Row 0: Preview -->
+        <Border Grid.Row="0" 
+                BorderBrush="Gray" 
+                BorderThickness="1" 
+                Background="Black"
+                Margin="0,0,0,0">
+            <Image x:Name="PreviewImage" 
+                   Stretch="Uniform"
+                   RenderOptions.BitmapScalingMode="HighQuality"/>
+        </Border>
+        <!-- Row 1: IP -->
+        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12">
             <TextBlock Text="Server IP:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox x:Name="ServerIpTextBox" Width="180" Text="127.0.0.1"/>
         </StackPanel>
 
-        <!-- ⭐ Row 1: Chọn nguồn Stream -->
-        <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12">
+        <!-- Row 2: Chọn nguồn Stream -->
+        <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,12">
             <TextBlock Text="Nguồn:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox x:Name="SourceComboBox" Width="150">
                 <ComboBoxItem Content="Screen" IsSelected="True"/>
@@ -30,8 +39,8 @@
             </ComboBox>
         </StackPanel>
 
-        <!-- Row 2: Buttons -->
-        <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,12">
+        <!-- Row 3: Buttons -->
+        <StackPanel Orientation="Horizontal" Grid.Row="3" Margin="0,0,0,12">
             <Button x:Name="StartButton"
                 Content="Start Streaming"
                 Width="140"
@@ -51,23 +60,13 @@
                 Click="MicToggle_Click"/>
         </StackPanel>
 
-        <!-- Row 3: Status -->
+        <!-- Row 4: Status -->
         <TextBlock x:Name="StatusText"
-               Grid.Row="3"
+               Grid.Row="4"
                Foreground="DarkGreen"
                TextWrapping="Wrap"
                Text="Chưa kết nối."
-               Margin="0,0,0,12"/>
-
-        <!-- Row 4: Preview -->
-        <Border Grid.Row="4" 
-                BorderBrush="Gray" 
-                BorderThickness="1" 
-                Background="Black"
-                Margin="0,0,0,0">
-            <Image x:Name="PreviewImage" 
-                   Stretch="Uniform"
-                   RenderOptions.BitmapScalingMode="HighQuality"/>
-        </Border>
+               Margin="0,0,0,12"
+        />
     </Grid>
 </Window>

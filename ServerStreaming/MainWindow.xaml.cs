@@ -1,13 +1,15 @@
 ﻿using OpenCvSharp;
 using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Media.Imaging;
 using NAudio.Wave;
+using System.Windows.Controls;
 
 namespace ServerStreaming
 {
@@ -21,10 +23,23 @@ namespace ServerStreaming
         private WaveOutEvent? waveOut;
         private BufferedWaveProvider? bufferedWaveProvider;
         private readonly object audioLock = new();
+        private UdpClient? udpServer;
+        private readonly object frameBufferLock = new();
+        private readonly Dictionary<FrameKey, ReassemblyBuffer> frameBuffers = new();
+        private readonly TimeSpan frameTimeout = TimeSpan.FromSeconds(2);
+        private const int PacketHeaderSize = 9;
+
+        // Multi-client support
+        private readonly Dictionary<IPEndPoint, ClientStreamInfo> activeClients = new();
+        private readonly object clientsLock = new();
+        private readonly TimeSpan clientTimeout = TimeSpan.FromSeconds(5);
+        private DateTime lastCleanupTime = DateTime.UtcNow;
+        private readonly TimeSpan cleanupInterval = TimeSpan.FromSeconds(2);
 
         public MainWindow()
         {
             InitializeComponent();
+            Closed += (_, _) => udpServer?.Dispose();
             StartServer();
         }
 
@@ -75,158 +90,289 @@ namespace ServerStreaming
         {
             Task.Run(async () =>
             {
-                TcpListener listener = new TcpListener(IPAddress.Any, PORT);
-                listener.Start();
-                Console.WriteLine($"Server listening on port {PORT}");
+                udpServer = new UdpClient(PORT);
+                Console.WriteLine($"UDP server listening on port {PORT}");
 
                 while (true)
                 {
-                    TcpClient client = await listener.AcceptTcpClientAsync();
-                    Console.WriteLine("Client connected");
-                    _ = HandleClient(client);
+                    try
+                    {
+                        UdpReceiveResult result = await udpServer.ReceiveAsync();
+                        ProcessDatagram(result.Buffer, result.RemoteEndPoint);
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"Error receiving UDP data: {ex.Message}");
+                    }
                 }
             });
         }
 
-        private async Task HandleClient(TcpClient client)
+        private void ProcessDatagram(byte[] buffer, IPEndPoint sender)
         {
-            NetworkStream ns = client.GetStream();
-            byte[] headerBuffer = new byte[3];
-            byte[] lengthBuffer = new byte[4];
-
-            // Initialize audio output
-            lock (audioLock)
+            if (buffer.Length < PacketHeaderSize)
             {
-                if (waveOut == null)
+                return;
+            }
+
+            Span<byte> span = buffer.AsSpan();
+            PacketMessageType messageType = (PacketMessageType)span[0];
+
+            if (messageType != PacketMessageType.Video && messageType != PacketMessageType.Audio)
+            {
+                return;
+            }
+
+            ushort frameId = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(1, 2));
+            ushort chunkIndex = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(3, 2));
+            ushort chunkCount = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(5, 2));
+            ushort payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(span.Slice(7, 2));
+
+            if (chunkCount == 0 || chunkIndex >= chunkCount)
+            {
+                return;
+            }
+
+            int actualPayloadLength = buffer.Length - PacketHeaderSize;
+            if (payloadLength != actualPayloadLength)
+            {
+                return;
+            }
+
+            byte[] chunkData = new byte[payloadLength];
+            Buffer.BlockCopy(buffer, PacketHeaderSize, chunkData, 0, payloadLength);
+
+            ReassemblyBuffer? frameBuffer;
+            bool isComplete;
+            FrameKey key = new(sender, messageType, frameId);
+
+            lock (frameBufferLock)
+            {
+                CleanupExpiredFrames_NoLock(DateTime.UtcNow);
+
+                if (!frameBuffers.TryGetValue(key, out frameBuffer) || frameBuffer.ChunkCount != chunkCount)
                 {
-                    waveOut = new WaveOutEvent();
-                    var waveFormat = new WaveFormat(16000, 16, 1);
-                    bufferedWaveProvider = new BufferedWaveProvider(waveFormat)
-                    {
-                        BufferLength = 1024 * 1024,
-                        DiscardOnBufferOverflow = true
-                    };
-                    waveOut.Init(bufferedWaveProvider);
-                    waveOut.Play();
+                    frameBuffer = new ReassemblyBuffer(chunkCount);
+                    frameBuffers[key] = frameBuffer;
+                }
+
+                isComplete = frameBuffer.TryAddChunk(chunkIndex, chunkData);
+                if (isComplete)
+                {
+                    frameBuffers.Remove(key);
                 }
             }
 
-            while (true)
+            if (!isComplete || frameBuffer == null)
             {
-                try
-                {
-                    // Read first 3 bytes to check for "AUD" header
-                    int headerRead = await ns.ReadAsync(headerBuffer, 0, 3);
-                    if (headerRead == 0) break;
-                    if (headerRead < 3) break;
+                return;
+            }
 
-                    // Check if it's audio header
-                    if (headerBuffer[0] == 0x41 && headerBuffer[1] == 0x55 && headerBuffer[2] == 0x44) // "AUD"
-                    {
-                        // This is audio data - read the 4-byte length
-                        int lengthRead = await ns.ReadAsync(lengthBuffer, 0, 4);
-                        if (lengthRead < 4) break;
+            byte[] payload = frameBuffer.Combine();
 
-                        int audioLength = BitConverter.ToInt32(lengthBuffer, 0);
-
-                        // Validate audio length (reasonable range)
-                        if (audioLength <= 0 || audioLength > 1024 * 1024)
-                        {
-                            Console.WriteLine($"Invalid audio length: {audioLength}");
-                            continue;
-                        }
-
-                        byte[] audioBuffer = new byte[audioLength];
-                        int audioOffset = 0;
-                        while (audioOffset < audioLength)
-                        {
-                            int bytesRead = await ns.ReadAsync(audioBuffer, audioOffset, audioLength - audioOffset);
-                            if (bytesRead == 0) break;
-                            audioOffset += bytesRead;
-                        }
-
-                        if (audioOffset == audioLength)
-                        {
-                            // Play audio
-                            lock (audioLock)
-                            {
-                                if (waveOut != null && bufferedWaveProvider != null && waveOut.PlaybackState == PlaybackState.Playing)
-                                {
-                                    bufferedWaveProvider.AddSamples(audioBuffer, 0, audioBuffer.Length);
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        // This is video data - the 3 bytes we read are the first 3 bytes of the 4-byte length
-                        // Read the 4th byte
-                        lengthBuffer[0] = headerBuffer[0];
-                        lengthBuffer[1] = headerBuffer[1];
-                        lengthBuffer[2] = headerBuffer[2];
-                        int fourthByte = await ns.ReadAsync(lengthBuffer, 3, 1);
-                        if (fourthByte < 1) break;
-
-                        int imgLength = BitConverter.ToInt32(lengthBuffer, 0);
-
-                        // Validate image length (reasonable range)
-                        if (imgLength <= 0 || imgLength > 50 * 1024 * 1024) // Max 50MB
-                        {
-                            Console.WriteLine($"Invalid image length: {imgLength}");
-                            continue;
-                        }
-
-                        byte[] imgBuffer = new byte[imgLength];
-                        int offset = 0;
-                        while (offset < imgLength)
-                        {
-                            int bytesRead = await ns.ReadAsync(imgBuffer, offset, imgLength - offset);
-                            if (bytesRead == 0) break;
-                            offset += bytesRead;
-                        }
-
-                        if (offset == imgLength)
-                        {
-                            try
-                            {
-                                BitmapImage img = new BitmapImage();
-                                img.BeginInit();
-                                img.StreamSource = new MemoryStream(imgBuffer);
-                                img.CacheOption = BitmapCacheOption.OnLoad;
-                                img.EndInit();
-                                img.Freeze();
-
-                                WriteFrame(imgBuffer, img.PixelWidth, img.PixelHeight);
-
-                                Dispatcher.Invoke(() => imgView.Source = img);
-                            }
-                            catch (Exception ex)
-                            {
-                                Console.WriteLine($"Error processing image: {ex.Message}");
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"Error in HandleClient: {ex.Message}");
+            switch (messageType)
+            {
+                case PacketMessageType.Video:
+                    _ = Task.Run(() => HandleVideoPayload(payload, sender));
                     break;
+                case PacketMessageType.Audio:
+                    _ = Task.Run(() => HandleAudioPayload(payload, sender));
+                    break;
+            }
+        }
+
+        private void HandleVideoPayload(byte[] imgBuffer, IPEndPoint sender)
+        {
+            try
+            {
+                using MemoryStream ms = new MemoryStream(imgBuffer);
+                BitmapImage img = new BitmapImage();
+                img.BeginInit();
+                img.StreamSource = ms;
+                img.CacheOption = BitmapCacheOption.OnLoad;
+                img.EndInit();
+                img.Freeze();
+
+                WriteFrame(imgBuffer, img.PixelWidth, img.PixelHeight);
+
+                // Get or create client stream UI
+                ClientStreamInfo clientInfo = GetOrCreateClientStream(sender);
+
+                Dispatcher.Invoke(() =>
+                {
+                    clientInfo.ImageControl.Source = img;
+                    clientInfo.LastUpdateTime = DateTime.UtcNow;
+                });
+
+                // Cleanup inactive clients periodically (every 2 seconds)
+                DateTime now = DateTime.UtcNow;
+                if (now - lastCleanupTime > cleanupInterval)
+                {
+                    lastCleanupTime = now;
+                    CleanupInactiveClients();
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error processing image: {ex.Message}");
+            }
+        }
+
+        private void HandleAudioPayload(byte[] audioBuffer, IPEndPoint sender)
+        {
+            if (audioBuffer.Length == 0)
+            {
+                return;
+            }
+
+            // Update client activity time
+            lock (clientsLock)
+            {
+                if (activeClients.TryGetValue(sender, out ClientStreamInfo? clientInfo))
+                {
+                    clientInfo.LastUpdateTime = DateTime.UtcNow;
                 }
             }
 
-            // Don't dispose audio output - keep it for next client
-            // Just stop playback
+            // For now, we'll play audio from the first active client
+            // In a more advanced implementation, you could mix audio from multiple clients
+            EnsureAudioInitialized();
+
             lock (audioLock)
             {
-                if (waveOut != null && bufferedWaveProvider != null)
+                if (waveOut != null && bufferedWaveProvider != null && waveOut.PlaybackState == PlaybackState.Playing)
                 {
-                    // Clear the buffer but keep the output ready
-                    bufferedWaveProvider.ClearBuffer();
+                    bufferedWaveProvider.AddSamples(audioBuffer, 0, audioBuffer.Length);
+                }
+            }
+        }
+
+        private void EnsureAudioInitialized()
+        {
+            lock (audioLock)
+            {
+                if (waveOut != null)
+                {
+                    return;
+                }
+
+                waveOut = new WaveOutEvent();
+                var waveFormat = new WaveFormat(16000, 16, 1);
+                bufferedWaveProvider = new BufferedWaveProvider(waveFormat)
+                {
+                    BufferLength = 1024 * 1024,
+                    DiscardOnBufferOverflow = true
+                };
+                waveOut.Init(bufferedWaveProvider);
+                waveOut.Play();
+            }
+        }
+
+        private void CleanupExpiredFrames_NoLock(DateTime now)
+        {
+            if (frameBuffers.Count == 0)
+            {
+                return;
+            }
+
+            List<FrameKey>? expired = null;
+
+            foreach (KeyValuePair<FrameKey, ReassemblyBuffer> kvp in frameBuffers)
+            {
+                if (now - kvp.Value.CreatedAt > frameTimeout)
+                {
+                    expired ??= new List<FrameKey>();
+                    expired.Add(kvp.Key);
                 }
             }
 
-            client.Close();
-            Console.WriteLine("Client disconnected");
+            if (expired == null)
+            {
+                return;
+            }
+
+            foreach (FrameKey key in expired)
+            {
+                frameBuffers.Remove(key);
+            }
+        }
+
+        private readonly record struct FrameKey(IPEndPoint Endpoint, PacketMessageType MessageType, ushort FrameId);
+
+        private enum PacketMessageType : byte
+        {
+            Video = 0,
+            Audio = 1
+        }
+
+        private sealed class ReassemblyBuffer
+        {
+            private readonly byte[][] chunks;
+            private readonly int[] chunkLengths;
+            private int receivedChunks;
+
+            public ReassemblyBuffer(int chunkCount)
+            {
+                if (chunkCount <= 0)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(chunkCount));
+                }
+
+                chunks = new byte[chunkCount][];
+                chunkLengths = new int[chunkCount];
+                CreatedAt = DateTime.UtcNow;
+            }
+
+            public DateTime CreatedAt { get; }
+            public int ChunkCount => chunks.Length;
+
+            public bool TryAddChunk(int index, byte[] payload)
+            {
+                if (index < 0 || index >= chunks.Length)
+                {
+                    return false;
+                }
+
+                if (chunks[index] != null)
+                {
+                    return false;
+                }
+
+                chunks[index] = payload;
+                chunkLengths[index] = payload.Length;
+                receivedChunks++;
+                return receivedChunks == chunks.Length;
+            }
+
+            public byte[] Combine()
+            {
+                int total = 0;
+                for (int i = 0; i < chunkLengths.Length; i++)
+                {
+                    total += chunkLengths[i];
+                }
+
+                byte[] output = new byte[total];
+                int offset = 0;
+
+                for (int i = 0; i < chunks.Length; i++)
+                {
+                    byte[]? chunk = chunks[i];
+                    if (chunk == null)
+                    {
+                        continue;
+                    }
+
+                    Buffer.BlockCopy(chunk, 0, output, offset, chunk.Length);
+                    offset += chunk.Length;
+                }
+
+                return output;
+            }
         }
 
         private void WriteFrame(byte[] imgBuffer, int width, int height)
@@ -290,6 +436,127 @@ namespace ServerStreaming
             }
 
             frame.Dispose();
+        }
+
+        private ClientStreamInfo GetOrCreateClientStream(IPEndPoint endpoint)
+        {
+            lock (clientsLock)
+            {
+                if (activeClients.TryGetValue(endpoint, out ClientStreamInfo? existing))
+                {
+                    return existing;
+                }
+
+                // Create new client stream UI
+                ClientStreamInfo newClient = new ClientStreamInfo
+                {
+                    Endpoint = endpoint,
+                    LastUpdateTime = DateTime.UtcNow
+                };
+
+                Dispatcher.Invoke(() =>
+                {
+                    // Create border with label and image
+                    Border border = new Border
+                    {
+                        BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Gray),
+                        BorderThickness = new Thickness(2),
+                        Margin = new Thickness(5),
+                        Width = 400,
+                        Height = 300
+                    };
+
+                    StackPanel panel = new StackPanel();
+
+                    // Client label
+                    TextBlock label = new TextBlock
+                    {
+                        Text = $"Client: {endpoint.Address}:{endpoint.Port}",
+                        Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.LightGray),
+                        Padding = new Thickness(5),
+                        FontWeight = FontWeights.Bold
+                    };
+
+                    // Image control
+                    Image img = new Image
+                    {
+                        Stretch = System.Windows.Media.Stretch.Uniform,
+                        Width = 390,
+                        Height = 250
+                    };
+
+                    panel.Children.Add(label);
+                    panel.Children.Add(img);
+                    border.Child = panel;
+
+                    StreamsPanel.Children.Add(border);
+
+                    newClient.ImageControl = img;
+                    newClient.BorderControl = border;
+                });
+
+                activeClients[endpoint] = newClient;
+                UpdateStatus($"Client connected: {endpoint.Address}:{endpoint.Port} (Total: {activeClients.Count})");
+
+                return newClient;
+            }
+        }
+
+        private void CleanupInactiveClients()
+        {
+            DateTime now = DateTime.UtcNow;
+            List<IPEndPoint>? toRemove = null;
+
+            lock (clientsLock)
+            {
+                foreach (var kvp in activeClients)
+                {
+                    if (now - kvp.Value.LastUpdateTime > clientTimeout)
+                    {
+                        toRemove ??= new List<IPEndPoint>();
+                        toRemove.Add(kvp.Key);
+                    }
+                }
+
+                if (toRemove != null)
+                {
+                    foreach (IPEndPoint endpoint in toRemove)
+                    {
+                        if (activeClients.TryGetValue(endpoint, out ClientStreamInfo? clientInfo))
+                        {
+                            Dispatcher.Invoke(() =>
+                            {
+                                StreamsPanel.Children.Remove(clientInfo.BorderControl);
+                            });
+                            activeClients.Remove(endpoint);
+                        }
+                    }
+
+                    if (toRemove.Count > 0)
+                    {
+                        UpdateStatus($"Removed {toRemove.Count} inactive client(s). Active: {activeClients.Count}");
+                    }
+                }
+            }
+        }
+
+        private void UpdateStatus(string message)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => StatusText.Text = message);
+                return;
+            }
+
+            StatusText.Text = message;
+        }
+
+        private sealed class ClientStreamInfo
+        {
+            public IPEndPoint Endpoint { get; set; } = null!;
+            public Image ImageControl { get; set; } = null!;
+            public Border BorderControl { get; set; } = null!;
+            public DateTime LastUpdateTime { get; set; }
         }
     }
 }

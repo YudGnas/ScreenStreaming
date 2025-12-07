@@ -1,7 +1,13 @@
-﻿using System.IO;
+﻿using System.Buffers;
+using System.Buffers.Binary;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.IO;
+using System.Linq;
 using System.Net.Sockets;
 using System.Runtime.InteropServices;
-using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -11,8 +17,6 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using System.Drawing;
-using System.Drawing.Imaging;
 using NAudio.Wave;
 
 namespace ClientStream
@@ -22,12 +26,16 @@ namespace ClientStream
         private const int Port = 5000;
         private const int SM_CXSCREEN = 0;
         private const int SM_CYSCREEN = 1;
+        private const int PacketHeaderSize = 9;
+        private const int MaxDatagramSize = 60000;
+        private const int MaxChunkPayload = MaxDatagramSize - PacketHeaderSize;
 
-        private TcpClient? client;
-        private NetworkStream? networkStream;
+        private UdpClient? udpClient;
         private CancellationTokenSource? streamingCts;
         private bool isStreaming;
         private readonly object streamLock = new();
+        private int videoSequence;
+        private int audioSequence;
 
         private WaveInEvent? waveIn;
         private bool isSendingAudio = false;
@@ -61,7 +69,7 @@ namespace ClientStream
 
 
         //Start 
-        private async void StartStreaming_Click(object sender, RoutedEventArgs e)
+        private void StartStreaming_Click(object sender, RoutedEventArgs e)
         {
             if (isStreaming)
             {
@@ -78,11 +86,16 @@ namespace ClientStream
 
             try
             {
-                client = new TcpClient();
-                await client.ConnectAsync(serverIp, Port);
-                networkStream = client.GetStream();
+                udpClient = new UdpClient();
+                udpClient.Connect(serverIp, Port);
                 streamingCts = new CancellationTokenSource();
                 isStreaming = true;
+
+                lock (streamLock)
+                {
+                    videoSequence = 0;
+                    audioSequence = 0;
+                }
 
                 // Stop preview when streaming starts
                 StopPreview();
@@ -216,14 +229,69 @@ namespace ClientStream
 
         private void SendFrame(byte[] frame)
         {
-            byte[] lengthBytes = BitConverter.GetBytes(frame.Length);
-
-            // Use synchronous writes within lock to ensure proper ordering with audio
             lock (streamLock)
             {
-                if (networkStream == null) return;
-                networkStream.Write(lengthBytes, 0, lengthBytes.Length);
-                networkStream.Write(frame, 0, frame.Length);
+                if (udpClient == null)
+                {
+                    return;
+                }
+
+                SendPacketLocked(udpClient, frame, PacketMessageType.Video, NextVideoFrameId());
+            }
+        }
+
+        private void SendAudio(byte[] audio)
+        {
+            lock (streamLock)
+            {
+                if (udpClient == null)
+                {
+                    return;
+                }
+
+                SendPacketLocked(udpClient, audio, PacketMessageType.Audio, NextAudioFrameId());
+            }
+        }
+
+        private ushort NextVideoFrameId() => (ushort)Interlocked.Increment(ref videoSequence);
+        private ushort NextAudioFrameId() => (ushort)Interlocked.Increment(ref audioSequence);
+
+        private void SendPacketLocked(UdpClient udp, byte[] payload, PacketMessageType messageType, ushort frameId)
+        {
+            int chunkCount = Math.Max(1, (payload.Length + MaxChunkPayload - 1) / MaxChunkPayload);
+            int offset = 0;
+
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(PacketHeaderSize + MaxChunkPayload);
+
+            try
+            {
+                for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+                {
+                    int chunkLength = Math.Min(MaxChunkPayload, payload.Length - offset);
+                    if (chunkLength < 0)
+                    {
+                        chunkLength = 0;
+                    }
+
+                    Span<byte> packet = buffer.AsSpan(0, PacketHeaderSize + chunkLength);
+                    packet[0] = (byte)messageType;
+                    BinaryPrimitives.WriteUInt16LittleEndian(packet.Slice(1, 2), frameId);
+                    BinaryPrimitives.WriteUInt16LittleEndian(packet.Slice(3, 2), (ushort)chunkIndex);
+                    BinaryPrimitives.WriteUInt16LittleEndian(packet.Slice(5, 2), (ushort)chunkCount);
+                    BinaryPrimitives.WriteUInt16LittleEndian(packet.Slice(7, 2), (ushort)chunkLength);
+
+                    if (chunkLength > 0)
+                    {
+                        payload.AsSpan(offset, chunkLength).CopyTo(packet.Slice(PacketHeaderSize));
+                    }
+
+                    udp.Send(buffer, PacketHeaderSize + chunkLength);
+                    offset += chunkLength;
+                }
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
             }
         }
 
@@ -234,7 +302,11 @@ namespace ClientStream
         private void StartMicrophone()
         {
             if (isSendingAudio) return;
-            if (networkStream == null) return;
+            if (udpClient == null)
+            {
+                UpdateStatus("Chưa kết nối đến server.");
+                return;
+            }
 
             try
             {
@@ -298,35 +370,23 @@ namespace ClientStream
             MicToggleButton.Content = isSendingAudio ? "Mic: On" : "Mic: Off";
         }
 
-        private async void WaveIn_DataAvailable(object? sender, WaveInEventArgs e)
+        private void WaveIn_DataAvailable(object? sender, WaveInEventArgs e)
         {
             try
             {
-                if (!isSendingAudio) return;
-
-                NetworkStream? stream;
-                lock (streamLock)
+                if (!isSendingAudio || e.BytesRecorded <= 0)
                 {
-                    stream = networkStream;
+                    return;
                 }
 
-                if (stream == null) return;
-
-                byte[] audio = e.Buffer.Take(e.BytesRecorded).ToArray();
-
-                byte[] header = Encoding.ASCII.GetBytes("AUD");
-                byte[] len = BitConverter.GetBytes(audio.Length);
-
-                // Use lock to ensure thread-safe writes with video frames
-                lock (streamLock)
-                {
-                    if (networkStream == null) return;
-                    networkStream.Write(header, 0, header.Length);
-                    networkStream.Write(len, 0, len.Length);
-                    networkStream.Write(audio, 0, audio.Length);
-                }
+                byte[] audio = new byte[e.BytesRecorded];
+                Buffer.BlockCopy(e.Buffer, 0, audio, 0, e.BytesRecorded);
+                SendAudio(audio);
             }
-            catch { }
+            catch
+            {
+                // Ignore audio send failures to keep capture running
+            }
         }
 
         // Cleanup
@@ -334,18 +394,24 @@ namespace ClientStream
         {
             lock (streamLock)
             {
-                if (!isStreaming && client == null && networkStream == null)
+                if (!isStreaming && udpClient == null)
                 {
                     return;
                 }
 
                 StopMicrophone();
-                networkStream?.Dispose();
-                client?.Close();
-                networkStream = null;
-                client = null;
+                udpClient?.Dispose();
+                udpClient = null;
                 isStreaming = false;
+                videoSequence = 0;
+                audioSequence = 0;
             }
+        }
+
+        private enum PacketMessageType : byte
+        {
+            Video = 0,
+            Audio = 1
         }
 
         private void UpdateStatus(string message)
