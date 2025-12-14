@@ -7,16 +7,65 @@
         mc:Ignorable="d"
         Title="Screen Server" Height="600" Width="1000">
     <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="250"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+        <!-- Recordings List Panel -->
+        <Border Grid.Row="0" Grid.Column="0" BorderBrush="Gray" BorderThickness="0,0,1,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" Text="Recorded Files" FontWeight="Bold" FontSize="14" 
+                           Padding="10" Background="LightGray" HorizontalAlignment="Stretch"/>
+                <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                    <ListBox x:Name="RecordingsListBox" SelectionChanged="RecordingsListBox_SelectionChanged">
+                        <ListBox.ItemContainerStyle>
+                            <Style TargetType="ListBoxItem">
+                                <Setter Property="Padding" Value="5"/>
+                            </Style>
+                        </ListBox.ItemContainerStyle>
+                    </ListBox>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- Main Content Area -->
+        <ScrollViewer Grid.Row="0" Grid.Column="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
             <WrapPanel x:Name="StreamsPanel" Orientation="Horizontal" Margin="5"/>
         </ScrollViewer>
 
-        <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="5">
+        <!-- Video Player Area (hidden by default, shown when playing) -->
+        <Border x:Name="VideoPlayerBorder" Grid.Row="0" Grid.Column="1" 
+                Background="Black" Visibility="Collapsed">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Grid.Row="0" x:Name="VideoPlayerTitle" Text="" 
+                           Foreground="White" Padding="10" FontWeight="Bold"/>
+                <MediaElement x:Name="VideoPlayer" Grid.Row="1" 
+                              LoadedBehavior="Manual" UnloadedBehavior="Stop"
+                              MediaEnded="VideoPlayer_MediaEnded"/>
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="10">
+                    <Button Content="Play" Width="80" Height="30" Margin="5" Click="PlayVideo_Click"/>
+                    <Button Content="Pause" Width="80" Height="30" Margin="5" Click="PauseVideo_Click"/>
+                    <Button Content="Stop" Width="80" Height="30" Margin="5" Click="StopVideo_Click"/>
+                    <Button Content="Close" Width="80" Height="30" Margin="5" Click="CloseVideo_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="5">
             <Button Content="Start Recording" Width="100" Height="30" Margin="5"
             Click="StartRecording_Click"/>
             <Button Content="Stop Recording" Width="100" Height="30" Margin="5"

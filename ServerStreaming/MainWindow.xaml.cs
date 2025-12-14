@@ -7,9 +7,9 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media.Imaging;
 using NAudio.Wave;
-using System.Windows.Controls;
 
 namespace ServerStreaming
 {
@@ -36,11 +36,30 @@ namespace ServerStreaming
         private DateTime lastCleanupTime = DateTime.UtcNow;
         private readonly TimeSpan cleanupInterval = TimeSpan.FromSeconds(2);
 
+        // Recording file management
+        private string? currentRecordingPath;
+        private readonly string recordingsDirectory;
+        private readonly object recordingsLock = new();
+
         public MainWindow()
         {
             InitializeComponent();
             Closed += (_, _) => udpServer?.Dispose();
+
+            // Create recordings directory if it doesn't exist
+            recordingsDirectory = Path.Combine(Environment.CurrentDirectory, "record");
+            if (!Directory.Exists(recordingsDirectory))
+            {
+                Directory.CreateDirectory(recordingsDirectory);
+            }
+
+            Loaded += MainWindow_Loaded;
             StartServer();
+        }
+
+        private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+        {
+            LoadRecordings();
         }
 
         private void RequestRecording()
@@ -60,6 +79,8 @@ namespace ServerStreaming
 
         private void StopRecording()
         {
+            string? savedPath = null;
+
             lock (recorderLock)
             {
                 recordRequested = false;
@@ -73,10 +94,21 @@ namespace ServerStreaming
                 recorder.Release();
                 recorder.Dispose();
                 recorder = null;
+                savedPath = currentRecordingPath;
+                currentRecordingPath = null;
                 isRecording = false;
             }
 
-            Dispatcher.Invoke(() => { StatusText.Text = "Đã dừng ghi video."; });
+            Dispatcher.Invoke(() =>
+            {
+                StatusText.Text = "Đã dừng ghi video.";
+
+                // Add the recording to the list if it was saved successfully
+                if (!string.IsNullOrEmpty(savedPath) && File.Exists(savedPath))
+                {
+                    AddRecordingToList(savedPath);
+                }
+            });
         }
 
         private void StartRecording_Click(object sender, RoutedEventArgs e) => RequestRecording();
@@ -399,7 +431,7 @@ namespace ServerStreaming
 
                 if (recorder == null)
                 {
-                    string output = Path.Combine(Environment.CurrentDirectory,
+                    string output = Path.Combine(recordingsDirectory,
                         $"record_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
 
                     recorder = new VideoWriter(
@@ -424,11 +456,12 @@ namespace ServerStreaming
                         return;
                     }
 
+                    currentRecordingPath = output;
                     isRecording = true;
 
                     Dispatcher.Invoke(() =>
                     {
-                        StatusText.Text = $"Đang ghi video: {output}";
+                        StatusText.Text = $"Đang ghi video: {Path.GetFileName(output)}";
                     });
                 }
 
@@ -557,6 +590,128 @@ namespace ServerStreaming
             public Image ImageControl { get; set; } = null!;
             public Border BorderControl { get; set; } = null!;
             public DateTime LastUpdateTime { get; set; }
+        }
+
+        // Recording file management methods
+        private void LoadRecordings()
+        {
+            try
+            {
+                if (!Directory.Exists(recordingsDirectory))
+                {
+                    return;
+                }
+
+                string[] recordingFiles = Directory.GetFiles(recordingsDirectory, "record_*.mp4", SearchOption.TopDirectoryOnly);
+
+                // Sort by creation time (newest first)
+                Array.Sort(recordingFiles, (a, b) =>
+                {
+                    return File.GetCreationTime(b).CompareTo(File.GetCreationTime(a));
+                });
+
+                Dispatcher.Invoke(() =>
+                {
+                    RecordingsListBox.Items.Clear();
+                    foreach (string file in recordingFiles)
+                    {
+                        string fileName = Path.GetFileName(file);
+                        string displayName = $"{fileName}\n{File.GetCreationTime(file):yyyy-MM-dd HH:mm:ss}";
+                        RecordingsListBox.Items.Add(displayName);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error loading recordings: {ex.Message}");
+            }
+        }
+
+        private void AddRecordingToList(string filePath)
+        {
+            if (!File.Exists(filePath))
+            {
+                return;
+            }
+
+            Dispatcher.Invoke(() =>
+            {
+                string fileName = Path.GetFileName(filePath);
+                string displayName = $"{fileName}\n{File.GetCreationTime(filePath):yyyy-MM-dd HH:mm:ss}";
+
+                // Insert at the beginning (newest first)
+                RecordingsListBox.Items.Insert(0, displayName);
+            });
+        }
+
+        private void RecordingsListBox_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+        {
+            if (RecordingsListBox.SelectedItem == null)
+            {
+                return;
+            }
+
+            string selectedItem = RecordingsListBox.SelectedItem.ToString() ?? string.Empty;
+            if (string.IsNullOrEmpty(selectedItem))
+            {
+                return;
+            }
+
+            // Extract filename from display string (first line)
+            string fileName = selectedItem.Split('\n')[0];
+            string filePath = Path.Combine(recordingsDirectory, fileName);
+
+            if (File.Exists(filePath))
+            {
+                PlayRecording(filePath);
+            }
+        }
+
+        private void PlayRecording(string filePath)
+        {
+            try
+            {
+                VideoPlayer.Source = new Uri(filePath);
+                VideoPlayerTitle.Text = $"Playing: {Path.GetFileName(filePath)}";
+                VideoPlayerBorder.Visibility = Visibility.Visible;
+                StreamsPanel.Visibility = Visibility.Collapsed;
+                VideoPlayer.Play();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error playing video: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private void PlayVideo_Click(object sender, RoutedEventArgs e)
+        {
+            VideoPlayer.Play();
+        }
+
+        private void PauseVideo_Click(object sender, RoutedEventArgs e)
+        {
+            VideoPlayer.Pause();
+        }
+
+        private void StopVideo_Click(object sender, RoutedEventArgs e)
+        {
+            VideoPlayer.Stop();
+        }
+
+        private void CloseVideo_Click(object sender, RoutedEventArgs e)
+        {
+            VideoPlayer.Stop();
+            VideoPlayer.Source = null;
+            VideoPlayerBorder.Visibility = Visibility.Collapsed;
+            StreamsPanel.Visibility = Visibility.Visible;
+            RecordingsListBox.SelectedItem = null;
+        }
+
+        private void VideoPlayer_MediaEnded(object sender, RoutedEventArgs e)
+        {
+            // Optionally loop or show message when video ends
+            // For now, just stop
+            VideoPlayer.Stop();
         }
     }
 }
