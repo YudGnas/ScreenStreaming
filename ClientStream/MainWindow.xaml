@@ -5,10 +5,11 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:ClientStream"
         mc:Ignorable="d"
-        Title="MainWindow" Height="450" Width="800">
+        Title="MainWindow" Height="700" Width="800">
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
@@ -24,14 +25,20 @@
                    Stretch="Uniform"
                    RenderOptions.BitmapScalingMode="HighQuality"/>
         </Border>
-        <!-- Row 1: IP -->
+        <!-- Row 1: Name -->
         <StackPanel Orientation="Horizontal" Grid.Row="1" Margin="0,0,0,12">
+            <TextBlock Text="Your Name:" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <TextBox x:Name="ClientNameTextBox" Width="180" Text="Client"/>
+        </StackPanel>
+
+        <!-- Row 2: IP -->
+        <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,12">
             <TextBlock Text="Server IP:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <TextBox x:Name="ServerIpTextBox" Width="180" Text="127.0.0.1"/>
         </StackPanel>
 
-        <!-- Row 2: Chọn nguồn Stream -->
-        <StackPanel Orientation="Horizontal" Grid.Row="2" Margin="0,0,0,12">
+        <!-- ⭐ Row 3: Chọn nguồn Stream -->
+        <StackPanel Orientation="Horizontal" Grid.Row="3" Margin="0,0,0,12">
             <TextBlock Text="Nguồn:" VerticalAlignment="Center" Margin="0,0,8,0"/>
             <ComboBox x:Name="SourceComboBox" Width="150">
                 <ComboBoxItem Content="Screen" IsSelected="True"/>
@@ -39,8 +46,8 @@
             </ComboBox>
         </StackPanel>
 
-        <!-- Row 3: Buttons -->
-        <StackPanel Orientation="Horizontal" Grid.Row="3" Margin="0,0,0,12">
+        <!-- Row 4: Buttons -->
+        <StackPanel Orientation="Horizontal" Grid.Row="4" Margin="0,0,0,12">
             <Button x:Name="StartButton"
                 Content="Start Streaming"
                 Width="140"
@@ -60,13 +67,14 @@
                 Click="MicToggle_Click"/>
         </StackPanel>
 
-        <!-- Row 4: Status -->
+        <!-- Row 5: Status -->
         <TextBlock x:Name="StatusText"
-               Grid.Row="4"
+               Grid.Row="5"
                Foreground="DarkGreen"
                TextWrapping="Wrap"
                Text="Chưa kết nối."
-               Margin="0,0,0,12"
-        />
+               Margin="0,0,0,12"/>
+
+        
     </Grid>
 </Window>

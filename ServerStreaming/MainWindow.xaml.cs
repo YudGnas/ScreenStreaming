@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -154,6 +155,13 @@ namespace ServerStreaming
             Span<byte> span = buffer.AsSpan();
             PacketMessageType messageType = (PacketMessageType)span[0];
 
+            // Handle ClientName packets separately (they don't need frame reassembly)
+            if (messageType == PacketMessageType.ClientName)
+            {
+                HandleClientNamePacket(buffer, sender);
+                return;
+            }
+
             if (messageType != PacketMessageType.Video && messageType != PacketMessageType.Audio)
             {
                 return;
@@ -214,6 +222,108 @@ namespace ServerStreaming
                 case PacketMessageType.Audio:
                     _ = Task.Run(() => HandleAudioPayload(payload, sender));
                     break;
+            }
+        }
+
+        private void HandleClientNamePacket(byte[] buffer, IPEndPoint sender)
+        {
+            try
+            {
+                if (buffer.Length < PacketHeaderSize)
+                {
+                    return;
+                }
+
+                ushort payloadLength = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(7, 2));
+                if (buffer.Length < PacketHeaderSize + payloadLength)
+                {
+                    return;
+                }
+
+                byte[] nameBytes = new byte[payloadLength];
+                Buffer.BlockCopy(buffer, PacketHeaderSize, nameBytes, 0, payloadLength);
+                string clientName = System.Text.Encoding.UTF8.GetString(nameBytes);
+
+                if (string.IsNullOrWhiteSpace(clientName))
+                {
+                    clientName = $"Client: {sender.Address}:{sender.Port}";
+                }
+
+                // Update or create client with name
+                lock (clientsLock)
+                {
+                    if (activeClients.TryGetValue(sender, out ClientStreamInfo? clientInfo))
+                    {
+                        clientInfo.ClientName = clientName;
+                        Dispatcher.Invoke(() =>
+                        {
+                            // Update the label text
+                            if (clientInfo.BorderControl?.Child is StackPanel panel &&
+                                panel.Children.Count > 0 &&
+                                panel.Children[0] is TextBlock label)
+                            {
+                                label.Text = clientName;
+                            }
+                        });
+                    }
+                    else
+                    {
+                        // Client stream not created yet, but we'll store the name
+                        // The name will be used when the first video frame arrives
+                        // For now, we can pre-create the client with the name
+                        ClientStreamInfo newClient = new ClientStreamInfo
+                        {
+                            Endpoint = sender,
+                            LastUpdateTime = DateTime.UtcNow,
+                            ClientName = clientName
+                        };
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            Border border = new Border
+                            {
+                                BorderBrush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.Gray),
+                                BorderThickness = new Thickness(2),
+                                Margin = new Thickness(5),
+                                Width = 400,
+                                Height = 300
+                            };
+
+                            StackPanel panel = new StackPanel();
+
+                            TextBlock label = new TextBlock
+                            {
+                                Text = clientName,
+                                Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.LightGray),
+                                Padding = new Thickness(5),
+                                FontWeight = FontWeights.Bold
+                            };
+
+                            Image img = new Image
+                            {
+                                Stretch = System.Windows.Media.Stretch.Uniform,
+                                Width = 390,
+                                Height = 250
+                            };
+
+                            panel.Children.Add(label);
+                            panel.Children.Add(img);
+                            border.Child = panel;
+
+                            StreamsPanel.Children.Add(border);
+
+                            newClient.ImageControl = img;
+                            newClient.BorderControl = border;
+                        });
+
+                        activeClients[sender] = newClient;
+                        UpdateStatus($"Client connected: {clientName} (Total: {activeClients.Count})");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error handling client name packet: {ex.Message}");
             }
         }
 
@@ -338,7 +448,8 @@ namespace ServerStreaming
         private enum PacketMessageType : byte
         {
             Video = 0,
-            Audio = 1
+            Audio = 1,
+            ClientName = 2
         }
 
         private sealed class ReassemblyBuffer
@@ -481,10 +592,12 @@ namespace ServerStreaming
                 }
 
                 // Create new client stream UI
+                string displayName = $"Client: {endpoint.Address}:{endpoint.Port}";
                 ClientStreamInfo newClient = new ClientStreamInfo
                 {
                     Endpoint = endpoint,
-                    LastUpdateTime = DateTime.UtcNow
+                    LastUpdateTime = DateTime.UtcNow,
+                    ClientName = string.Empty
                 };
 
                 Dispatcher.Invoke(() =>
@@ -501,10 +614,10 @@ namespace ServerStreaming
 
                     StackPanel panel = new StackPanel();
 
-                    // Client label
+                    // Client label - will be updated when name is received
                     TextBlock label = new TextBlock
                     {
-                        Text = $"Client: {endpoint.Address}:{endpoint.Port}",
+                        Text = displayName,
                         Background = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Colors.LightGray),
                         Padding = new Thickness(5),
                         FontWeight = FontWeights.Bold
@@ -590,6 +703,7 @@ namespace ServerStreaming
             public Image ImageControl { get; set; } = null!;
             public Border BorderControl { get; set; } = null!;
             public DateTime LastUpdateTime { get; set; }
+            public string ClientName { get; set; } = string.Empty;
         }
 
         // Recording file management methods

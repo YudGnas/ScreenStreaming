@@ -102,6 +102,14 @@ namespace ClientStream
 
                 UpdateStatus("Đã kết nối. Đang phát luồng...");
 
+                // Send client name to server
+                string clientName = ClientNameTextBox.Text.Trim();
+                if (string.IsNullOrWhiteSpace(clientName))
+                {
+                    clientName = "Client";
+                }
+                SendClientName(clientName);
+
                 // Don't start mic automatically - user controls it via button
 
                 //Video
@@ -250,6 +258,20 @@ namespace ClientStream
                 }
 
                 SendPacketLocked(udpClient, audio, PacketMessageType.Audio, NextAudioFrameId());
+            }
+        }
+
+        private void SendClientName(string name)
+        {
+            lock (streamLock)
+            {
+                if (udpClient == null)
+                {
+                    return;
+                }
+
+                byte[] nameBytes = System.Text.Encoding.UTF8.GetBytes(name);
+                SendPacketLocked(udpClient, nameBytes, PacketMessageType.ClientName, 0);
             }
         }
 
@@ -411,7 +433,8 @@ namespace ClientStream
         private enum PacketMessageType : byte
         {
             Video = 0,
-            Audio = 1
+            Audio = 1,
+            ClientName = 2
         }
 
         private void UpdateStatus(string message)
