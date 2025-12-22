@@ -40,10 +40,11 @@
         <!-- ⭐ Row 3: Chọn nguồn Stream -->
         <StackPanel Orientation="Horizontal" Grid.Row="3" Margin="0,0,0,12">
             <TextBlock Text="Nguồn:" VerticalAlignment="Center" Margin="0,0,8,0"/>
-            <ComboBox x:Name="SourceComboBox" Width="150">
+            <ComboBox x:Name="SourceComboBox" Width="150" Margin="0,0,10,0">
                 <ComboBoxItem Content="Screen" IsSelected="True"/>
                 <ComboBoxItem Content="Webcam"/>
             </ComboBox>
+            <CheckBox x:Name="FaceDetectionCheckBox" Content="Face Detection" IsChecked="True" VerticalAlignment="Center"/>
         </StackPanel>
 
         <!-- Row 4: Buttons -->
@@ -75,6 +76,7 @@
                Text="Chưa kết nối."
                Margin="0,0,0,12"/>
 
-        
+
     </Grid>
+
 </Window>

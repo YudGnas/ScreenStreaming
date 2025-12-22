@@ -1,4 +1,6 @@
-﻿using System.Buffers;
+﻿using Microsoft.VisualBasic;
+using NAudio.Wave;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -17,7 +19,6 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
-using NAudio.Wave;
 
 namespace ClientStream
 {
@@ -43,12 +44,29 @@ namespace ClientStream
         private bool isPreviewing;
         private readonly object previewLock = new();
 
+        private OpenCvSharp.CascadeClassifier? faceCascade;
+
         public MainWindow()
         {
             InitializeComponent();
             Closed += (_, _) => { StopStreaming(); StopPreview(); };
             Loaded += MainWindow_Loaded;
             SourceComboBox.SelectionChanged += SourceComboBox_SelectionChanged;
+
+            try
+            {
+                string cascadePath = System.IO.Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "haarcascade_frontalface_default.xml");
+                if (!File.Exists(cascadePath))
+                {
+                    cascadePath = System.IO.Path.Combine(Environment.CurrentDirectory, "haarcascade_frontalface_default.xml");
+                }
+
+                if (File.Exists(cascadePath))
+                {
+                    faceCascade = new OpenCvSharp.CascadeClassifier(cascadePath);
+                }
+            }
+            catch { /* Ignore error */ }
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -210,6 +228,8 @@ namespace ClientStream
                     cam.Read(mat);
 
                     if (mat.Empty()) continue;
+
+                    DetectAndDrawFaces(mat);
 
                     Bitmap bmp = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
                     mat.Dispose();
@@ -529,6 +549,8 @@ namespace ClientStream
 
                     if (mat.Empty()) continue;
 
+                    DetectAndDrawFaces(mat);
+
                     Bitmap bmp = OpenCvSharp.Extensions.BitmapConverter.ToBitmap(mat);
                     mat.Dispose();
 
@@ -578,6 +600,33 @@ namespace ClientStream
             catch
             {
                 // Ignore preview update errors
+            }
+        }
+
+        private void DetectAndDrawFaces(OpenCvSharp.Mat mat)
+        {
+            if (faceCascade == null) return;
+
+            bool detectEnabled = false;
+            Dispatcher.Invoke(() => detectEnabled = FaceDetectionCheckBox.IsChecked == true);
+            if (!detectEnabled) return;
+
+            using var gray = new OpenCvSharp.Mat();
+            OpenCvSharp.Cv2.CvtColor(mat, gray, OpenCvSharp.ColorConversionCodes.BGR2GRAY);
+            OpenCvSharp.Cv2.EqualizeHist(gray, gray);
+
+            var faces = faceCascade.DetectMultiScale(
+                gray,
+                1.1,
+                3,
+                OpenCvSharp.HaarDetectionTypes.ScaleImage,
+                new OpenCvSharp.Size(30, 30));
+
+            foreach (var rect in faces)
+            {
+                OpenCvSharp.Cv2.Rectangle(mat, rect, OpenCvSharp.Scalar.Red, 2);
+                OpenCvSharp.Cv2.PutText(mat, "Face", new OpenCvSharp.Point(rect.X, rect.Y - 5),
+                    OpenCvSharp.HersheyFonts.HersheyComplex, 0.5, OpenCvSharp.Scalar.Red, 1);
             }
         }
     }

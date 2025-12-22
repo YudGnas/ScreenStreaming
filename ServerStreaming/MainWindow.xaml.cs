@@ -1,4 +1,6 @@
-﻿using OpenCvSharp;
+﻿using Microsoft.VisualBasic;
+using NAudio.Wave;
+using OpenCvSharp;
 using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
@@ -10,7 +12,6 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
-using NAudio.Wave;
 
 namespace ServerStreaming
 {
@@ -20,6 +21,9 @@ namespace ServerStreaming
         private bool isRecording;
         private bool recordRequested;
         private readonly object recorderLock = new();
+        private DateTime currentSegmentStartTime;
+        private int currentSegmentDurationSeconds;
+        private bool isSegmentedMode;
         private const int PORT = 5000;
         private WaveOutEvent? waveOut;
         private BufferedWaveProvider? bufferedWaveProvider;
@@ -29,6 +33,8 @@ namespace ServerStreaming
         private readonly Dictionary<FrameKey, ReassemblyBuffer> frameBuffers = new();
         private readonly TimeSpan frameTimeout = TimeSpan.FromSeconds(2);
         private const int PacketHeaderSize = 9;
+
+        private CascadeClassifier? faceCascade;
 
         // Multi-client support
         private readonly Dictionary<IPEndPoint, ClientStreamInfo> activeClients = new();
@@ -56,6 +62,29 @@ namespace ServerStreaming
 
             Loaded += MainWindow_Loaded;
             StartServer();
+
+            try
+            {
+                string cascadePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "haarcascade_frontalface_default.xml");
+                if (!File.Exists(cascadePath))
+                {
+                    // Fallback to project directory if not in output directory
+                    cascadePath = Path.Combine(Environment.CurrentDirectory, "haarcascade_frontalface_default.xml");
+                }
+
+                if (File.Exists(cascadePath))
+                {
+                    faceCascade = new CascadeClassifier(cascadePath);
+                }
+                else
+                {
+                    UpdateStatus("Warning: Face cascade file not found.");
+                }
+            }
+            catch (Exception ex)
+            {
+                UpdateStatus($"Error loading face cascade: {ex.Message}");
+            }
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -70,6 +99,13 @@ namespace ServerStreaming
                 if (recordRequested)
                 {
                     return;
+                }
+
+                // Get segmented recording settings from UI
+                isSegmentedMode = SegmentedRecordingCheckBox.IsChecked == true;
+                if (!int.TryParse(SegmentDurationTextBox.Text, out currentSegmentDurationSeconds) || currentSegmentDurationSeconds <= 0)
+                {
+                    currentSegmentDurationSeconds = 10; // Default to 10 seconds if invalid
                 }
 
                 recordRequested = true;
@@ -331,22 +367,50 @@ namespace ServerStreaming
         {
             try
             {
-                using MemoryStream ms = new MemoryStream(imgBuffer);
-                BitmapImage img = new BitmapImage();
-                img.BeginInit();
-                img.StreamSource = ms;
-                img.CacheOption = BitmapCacheOption.OnLoad;
-                img.EndInit();
-                img.Freeze();
+                using Mat frame = Cv2.ImDecode(imgBuffer, ImreadModes.Color);
+                if (frame.Empty()) return;
 
-                WriteFrame(imgBuffer, img.PixelWidth, img.PixelHeight);
+                bool detectFaces = false;
+                Dispatcher.Invoke(() => detectFaces = FaceDetectionCheckBox.IsChecked == true);
+
+                if (detectFaces && faceCascade != null)
+                {
+                    using Mat gray = new Mat();
+                    Cv2.CvtColor(frame, gray, ColorConversionCodes.BGR2GRAY);
+                    Cv2.EqualizeHist(gray, gray);
+
+                    OpenCvSharp.Rect[] faces = faceCascade.DetectMultiScale(
+                        gray,
+                        1.1,
+                        3,
+                        HaarDetectionTypes.ScaleImage,
+                        new OpenCvSharp.Size(30, 30));
+
+                    foreach (var rect in faces)
+                    {
+                        Cv2.Rectangle(frame, rect, Scalar.Red, 2);
+                        Cv2.PutText(frame, "Face", new OpenCvSharp.Point(rect.X, rect.Y - 5),
+                            HersheyFonts.HersheyComplex, 0.5, Scalar.Red, 1);
+                    }
+                }
+
+                // Convert Mat to BitmapImage
+                using var memoryStream = frame.ToMemoryStream(".jpg");
+                BitmapImage bitmap = new BitmapImage();
+                bitmap.BeginInit();
+                bitmap.StreamSource = memoryStream;
+                bitmap.CacheOption = BitmapCacheOption.OnLoad;
+                bitmap.EndInit();
+                bitmap.Freeze();
+
+                WriteFrameFromMat(frame);
 
                 // Get or create client stream UI
                 ClientStreamInfo clientInfo = GetOrCreateClientStream(sender);
 
                 Dispatcher.Invoke(() =>
                 {
-                    clientInfo.ImageControl.Source = img;
+                    clientInfo.ImageControl.Source = bitmap;
                     clientInfo.LastUpdateTime = DateTime.UtcNow;
                 });
 
@@ -518,17 +582,10 @@ namespace ServerStreaming
             }
         }
 
-        private void WriteFrame(byte[] imgBuffer, int width, int height)
+        private void WriteFrameFromMat(Mat frame)
         {
             if (!recordRequested)
             {
-                return;
-            }
-
-            Mat frame = Cv2.ImDecode(imgBuffer, ImreadModes.Color);
-            if (frame.Empty())
-            {
-                frame.Dispose();
                 return;
             }
 
@@ -536,8 +593,29 @@ namespace ServerStreaming
             {
                 if (!recordRequested)
                 {
-                    frame.Dispose();
                     return;
+                }
+
+                DateTime now = DateTime.Now;
+
+                // Check if we need to start a new segment
+                if (recorder != null && isSegmentedMode)
+                {
+                    if ((now - currentSegmentStartTime).TotalSeconds >= currentSegmentDurationSeconds)
+                    {
+                        // Stop current segment
+                        recorder.Release();
+                        recorder.Dispose();
+                        recorder = null;
+
+                        string savedPath = currentRecordingPath;
+                        currentRecordingPath = null;
+
+                        if (!string.IsNullOrEmpty(savedPath) && File.Exists(savedPath))
+                        {
+                            AddRecordingToList(savedPath);
+                        }
+                    }
                 }
 
                 if (recorder == null)
@@ -549,7 +627,7 @@ namespace ServerStreaming
                         output,
                         FourCC.H264,
                         30,
-                        new OpenCvSharp.Size(width, height)
+                        new OpenCvSharp.Size(frame.Width, frame.Height)
                     );
 
                     if (!recorder.IsOpened())
@@ -563,23 +641,23 @@ namespace ServerStreaming
                             StatusText.Text = "Không thể bắt đầu ghi hình.";
                         });
 
-                        frame.Dispose();
                         return;
                     }
 
                     currentRecordingPath = output;
                     isRecording = true;
+                    currentSegmentStartTime = now;
 
                     Dispatcher.Invoke(() =>
                     {
-                        StatusText.Text = $"Đang ghi video: {Path.GetFileName(output)}";
+                        StatusText.Text = isSegmentedMode
+                            ? $"Đang ghi phân đoạn ({currentSegmentDurationSeconds}s): {Path.GetFileName(output)}"
+                            : $"Đang ghi video: {Path.GetFileName(output)}";
                     });
                 }
 
                 recorder?.Write(frame);
             }
-
-            frame.Dispose();
         }
 
         private ClientStreamInfo GetOrCreateClientStream(IPEndPoint endpoint)

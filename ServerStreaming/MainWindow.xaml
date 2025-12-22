@@ -24,7 +24,7 @@
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0" Text="Recorded Files" FontWeight="Bold" FontSize="14" 
-                           Padding="10" Background="LightGray" HorizontalAlignment="Stretch"/>
+                       Padding="10" Background="LightGray" HorizontalAlignment="Stretch"/>
                 <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
                     <ListBox x:Name="RecordingsListBox" SelectionChanged="RecordingsListBox_SelectionChanged">
                         <ListBox.ItemContainerStyle>
@@ -44,7 +44,7 @@
 
         <!-- Video Player Area (hidden by default, shown when playing) -->
         <Border x:Name="VideoPlayerBorder" Grid.Row="0" Grid.Column="1" 
-                Background="Black" Visibility="Collapsed">
+            Background="Black" Visibility="Collapsed">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -52,10 +52,10 @@
                     <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 <TextBlock Grid.Row="0" x:Name="VideoPlayerTitle" Text="" 
-                           Foreground="White" Padding="10" FontWeight="Bold"/>
+                       Foreground="White" Padding="10" FontWeight="Bold"/>
                 <MediaElement x:Name="VideoPlayer" Grid.Row="1" 
-                              LoadedBehavior="Manual" UnloadedBehavior="Stop"
-                              MediaEnded="VideoPlayer_MediaEnded"/>
+                          LoadedBehavior="Manual" UnloadedBehavior="Stop"
+                          MediaEnded="VideoPlayer_MediaEnded"/>
                 <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Center" Margin="10">
                     <Button Content="Play" Width="80" Height="30" Margin="5" Click="PlayVideo_Click"/>
                     <Button Content="Pause" Width="80" Height="30" Margin="5" Click="PauseVideo_Click"/>
@@ -67,11 +67,14 @@
 
         <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="5">
             <Button Content="Start Recording" Width="100" Height="30" Margin="5"
-            Click="StartRecording_Click"/>
+        Click="StartRecording_Click"/>
             <Button Content="Stop Recording" Width="100" Height="30" Margin="5"
-            Click="StopRecording_Click"/>
+        Click="StopRecording_Click"/>
+            <CheckBox x:Name="SegmentedRecordingCheckBox" Content="Segmented" VerticalAlignment="Center" Margin="5,0"/>
+            <TextBox x:Name="SegmentDurationTextBox" Width="40" Height="25" Text="10" VerticalAlignment="Center" Margin="5,0" VerticalContentAlignment="Center"/>
+            <TextBlock Text="sec" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <CheckBox x:Name="FaceDetectionCheckBox" Content="Face Detection" IsChecked="True" VerticalAlignment="Center" Margin="10,0"/>
             <TextBlock x:Name="StatusText" Margin="10" Foreground="Black" VerticalAlignment="Center"/>
         </StackPanel>
     </Grid>
-
 </Window>
