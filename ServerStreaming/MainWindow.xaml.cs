@@ -148,12 +148,7 @@ namespace ServerStreaming
             });
         }
 
-        private void StartRecording_Click(object sender, RoutedEventArgs e) => RequestRecording();
 
-        private void StopRecording_Click(object sender, RoutedEventArgs e)
-        {
-            StopRecording();
-        }
 
         private void StartServer()
         {
@@ -582,83 +577,7 @@ namespace ServerStreaming
             }
         }
 
-        private void WriteFrameFromMat(Mat frame)
-        {
-            if (!recordRequested)
-            {
-                return;
-            }
-
-            lock (recorderLock)
-            {
-                if (!recordRequested)
-                {
-                    return;
-                }
-
-                DateTime now = DateTime.Now;
-
-                // Check if we need to start a new segment
-                if (recorder != null && isSegmentedMode)
-                {
-                    if ((now - currentSegmentStartTime).TotalSeconds >= currentSegmentDurationSeconds)
-                    {
-                        // Stop current segment
-                        recorder.Release();
-                        recorder.Dispose();
-                        recorder = null;
-
-                        string savedPath = currentRecordingPath;
-                        currentRecordingPath = null;
-
-                        if (!string.IsNullOrEmpty(savedPath) && File.Exists(savedPath))
-                        {
-                            AddRecordingToList(savedPath);
-                        }
-                    }
-                }
-
-                if (recorder == null)
-                {
-                    string output = Path.Combine(recordingsDirectory,
-                        $"record_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
-
-                    recorder = new VideoWriter(
-                        output,
-                        FourCC.H264,
-                        30,
-                        new OpenCvSharp.Size(frame.Width, frame.Height)
-                    );
-
-                    if (!recorder.IsOpened())
-                    {
-                        recorder.Dispose();
-                        recorder = null;
-                        recordRequested = false;
-
-                        Dispatcher.Invoke(() =>
-                        {
-                            StatusText.Text = "Không thể bắt đầu ghi hình.";
-                        });
-
-                        return;
-                    }
-
-                    currentRecordingPath = output;
-                    isRecording = true;
-                    currentSegmentStartTime = now;
-
-                    Dispatcher.Invoke(() =>
-                    {
-                        StatusText.Text = isSegmentedMode
-                            ? $"Đang ghi phân đoạn ({currentSegmentDurationSeconds}s): {Path.GetFileName(output)}"
-                            : $"Đang ghi video: {Path.GetFileName(output)}";
-                    });
-                }
-
-                recorder?.Write(frame);
-            }
-        }
+        
 
         private ClientStreamInfo GetOrCreateClientStream(IPEndPoint endpoint)
         {
@@ -785,6 +704,94 @@ namespace ServerStreaming
         }
 
         // Recording file management methods
+
+
+        private void StartRecording_Click(object sender, RoutedEventArgs e) => RequestRecording();
+
+        private void StopRecording_Click(object sender, RoutedEventArgs e)
+        {
+            StopRecording();
+        }
+
+        private void WriteFrameFromMat(Mat frame)
+        {
+            if (!recordRequested)
+            {
+                return;
+            }
+
+            lock (recorderLock)
+            {
+                if (!recordRequested)
+                {
+                    return;
+                }
+
+                DateTime now = DateTime.Now;
+
+                // Check if we need to start a new segment
+                if (recorder != null && isSegmentedMode)
+                {
+                    if ((now - currentSegmentStartTime).TotalSeconds >= currentSegmentDurationSeconds)
+                    {
+                        // Stop current segment
+                        recorder.Release();
+                        recorder.Dispose();
+                        recorder = null;
+
+                        string savedPath = currentRecordingPath;
+                        currentRecordingPath = null;
+
+                        if (!string.IsNullOrEmpty(savedPath) && File.Exists(savedPath))
+                        {
+                            AddRecordingToList(savedPath);
+                        }
+                    }
+                }
+
+                if (recorder == null)
+                {
+                    string output = Path.Combine(recordingsDirectory,
+                        $"record_{DateTime.Now:yyyyMMdd_HHmmss}.mp4");
+
+                    recorder = new VideoWriter(
+                        output,
+                        FourCC.H264,
+                        30,
+                        new OpenCvSharp.Size(frame.Width, frame.Height)
+                    );
+
+                    if (!recorder.IsOpened())
+                    {
+                        recorder.Dispose();
+                        recorder = null;
+                        recordRequested = false;
+
+                        Dispatcher.Invoke(() =>
+                        {
+                            StatusText.Text = "Không thể bắt đầu ghi hình.";
+                        });
+
+                        return;
+                    }
+
+                    currentRecordingPath = output;
+                    isRecording = true;
+                    currentSegmentStartTime = now;
+
+                    Dispatcher.Invoke(() =>
+                    {
+                        StatusText.Text = isSegmentedMode
+                            ? $"Đang ghi phân đoạn ({currentSegmentDurationSeconds}s): {Path.GetFileName(output)}"
+                            : $"Đang ghi video: {Path.GetFileName(output)}";
+                    });
+                }
+
+                recorder?.Write(frame);
+            }
+        }
+
+
         private void LoadRecordings()
         {
             try
