@@ -1,11 +1,11 @@
-# 🎥 ScreenStreaming
+#  ScreenStreaming
 
 **ScreenStreaming** là một project C# cho phép stream màn hình (client và server).  
 Repository này chứa mã nguồn cho cả phần **client** và **server** streaming. :contentReference[oaicite:1]{index=1}
 
 ---
 
-## 📌 Mục đích
+##  Mục đích
 
 Mục tiêu của dự án là tạo một hệ thống streaming màn hình đơn giản để:
 - Gửi hình ảnh/màn hình từ client lên server
@@ -15,15 +15,14 @@ Mục tiêu của dự án là tạo một hệ thống streaming màn hình đ�
 
 ---
 
-## 🧱 Cấu trúc thư mục
+##  Cấu trúc thư mục
 
-```text
 ScreenStreaming/
 ├── ClientStream/          # Phần Client 
 ├── ServerStreaming/       # Phần server xử lý streaming
 ├── .gitignore
 
-
+---
 
 ## Hướng dẫn sử dụng
 1. Clone project
